@@ -85,15 +85,13 @@ async function callSandbox(path, params, mockFixture) {
     if (FORCE_MOCK || !SANDBOX_API_KEY) {
         return { ok: true, source: 'mock', data: mockFixture };
     }
-
     try {
         const res = await http.get(`${SANDBOX_BASE}/${path}`, {
             params: { '$format': 'json', ...params },
         });
         const body = res.data?.d?.results ?? res.data?.d ?? res.data;
         return { ok: true, source: 'sandbox', data: body };
-    } catch (err) {
-  } catch (err) {
+   } catch (err) {
     console.error('[sandbox-client] Sandbox call FAILED:', {
         url: `${SANDBOX_BASE}/${path}`,
         status: err.response?.status,
