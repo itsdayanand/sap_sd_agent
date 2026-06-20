@@ -19,7 +19,7 @@ const customerDetails = (customerId) => ({
     BusinessPartner: customerId,
     BusinessPartnerFullName: 'Mock Customer GmbH',
     BusinessPartnerType: '2',
-    IsBlocked: false
+    BusinessPartnerIsBlocked: false
 });
 
 const pricingConditions = (customerId, materialId) => [

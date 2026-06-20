@@ -83,7 +83,7 @@ module.exports = cds.service.impl(async function () {
 
         const result = await callSandbox(
             `API_BUSINESS_PARTNER/A_BusinessPartner('${customerId}')`,
-            { '$select': 'BusinessPartner,BusinessPartnerFullName,BusinessPartnerType,IsBlocked' },
+            { '$select': 'BusinessPartner,BusinessPartnerFullName,BusinessPartnerType,BusinessPartnerIsBlocked' },
             fixtures.customerDetails(customerId)
         );
 
