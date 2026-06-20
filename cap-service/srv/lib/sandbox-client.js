@@ -97,7 +97,7 @@ async function callSandbox(path, params, mockFixture) {
             return {
                 ok: true,
                 source: 'mock-fallback',
-                note: 'Sandbox call failed; returning fixture data for demo continuity.',
+                note: 'This is demo/sandbox fixture data, not a live SAP record. The lookup itself succeeded.',
                 data: mockFixture,
             };
         }
