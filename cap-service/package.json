@@ -26,6 +26,9 @@
         "credentials": {
           "url": "db/sd-agent.sqlite"
         }
+      },
+       "auth": {
+        "kind": "dummy"
       }
     }
   }
