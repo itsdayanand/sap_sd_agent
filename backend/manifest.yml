@@ -12,7 +12,7 @@ applications:
       LLM_MODEL: gpt-4o
       # CAP service route — update the subdomain after your first
       # `cf push` of cap-service shows you the actual assigned route.
-      CAP_BASE_URL: https://sd-agent-cap-service.cfapps.us10-001.hana.ondemand.com/odata/v4/sd-agent
+      CAP_BASE_URL: https://sdagent-cap-service.cfapps.us10-001.hana.ondemand.com/odata/v4/sdagent
       # The UI is now served BY the CAP app itself (cap-service/app/sd-agent-ui),
       # not a separate frontend app, so this points at the CAP route + UI path.
       ALLOWED_ORIGINS: https://sd-agent-cap-service.cfapps.us10-001.hana.ondemand.com
