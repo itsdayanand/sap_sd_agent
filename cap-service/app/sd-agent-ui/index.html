@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -183,7 +184,7 @@
 // ?agent=https://your-fastapi-route... for local testing.
 const AGENT_URL = (new URLSearchParams(location.search).get('agent'))
   || window.AGENT_URL
-  || 'https://sd-agent-backend.cfapps.us10-001.hana.ondemand.com';
+  || 'http://localhost:8000';
 
 const TOOL_ICONS = {
   get_sales_orders: '📋',
@@ -285,50 +286,104 @@ function renderMarkdownLite(text) {
   return safe;
 }
 
+// Tracks DOM elements per message index so we can update them in place
+// rather than tearing down and rebuilding the entire list on every
+// streamed token. A full rebuild on every token caused two visible bugs:
+// (1) mid-paint tearing (a line would render half-drawn), and
+// (2) any expanded tool panel snapped shut, since its open/closed state
+// lived only in a local JS closure tied to a DOM node that kept getting
+// destroyed and recreated.
+const messageElements = []; // [{ row, bubble, cursor, toolPanel }]
+
 function renderMessages() {
-  messagesEl.querySelectorAll('.msg-row, .tool-panel').forEach(el => el.remove());
   emptyHintEl.style.display = messages.length ? 'none' : 'block';
   copyBtn.disabled = !messages.length;
   clearBtn.disabled = !messages.length;
   promptChipsEl.style.display = messages.length ? 'none' : 'flex';
 
-  for (const msg of messages) {
-    const row = document.createElement('div');
-    row.className = `msg-row ${msg.role}`;
-
-    if (msg.role === 'assistant') {
-      const icon = document.createElement('span');
-      icon.className = 'msg-icon';
-      icon.textContent = '🛰️';
-      row.appendChild(icon);
-    }
-
-    const bubble = document.createElement('div');
-    bubble.className = `bubble ${msg.role}`;
-    bubble.innerHTML = renderMarkdownLite(msg.content || (msg.streaming ? '…' : ''));
-    if (msg.streaming) {
-      const cursor = document.createElement('span');
-      cursor.className = 'cursor';
-      cursor.textContent = '▌';
-      bubble.appendChild(cursor);
-    }
-    row.appendChild(bubble);
-
-    if (msg.role === 'user') {
-      const icon = document.createElement('span');
-      icon.className = 'msg-icon';
-      icon.textContent = '🧑‍💼';
-      row.appendChild(icon);
-    }
-
-    messagesEl.appendChild(row);
-
-    if (msg.toolCalls && msg.toolCalls.length) {
-      messagesEl.appendChild(renderToolPanel(msg.toolCalls));
-    }
+  // Remove DOM entries for messages that no longer exist (e.g. after Clear).
+  while (messageElements.length > messages.length) {
+    const stale = messageElements.pop();
+    stale.row?.remove();
+    stale.toolPanel?.remove();
   }
 
+  messages.forEach((msg, i) => {
+    if (!messageElements[i]) {
+      messageElements[i] = createMessageElement(msg);
+      messagesEl.appendChild(messageElements[i].row);
+    }
+    updateMessageElement(messageElements[i], msg, i);
+  });
+
   messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function createMessageElement(msg) {
+  const row = document.createElement('div');
+  row.className = `msg-row ${msg.role}`;
+
+  if (msg.role === 'assistant') {
+    const icon = document.createElement('span');
+    icon.className = 'msg-icon';
+    icon.textContent = '🛰️';
+    row.appendChild(icon);
+  }
+
+  const bubble = document.createElement('div');
+  bubble.className = `bubble ${msg.role}`;
+  row.appendChild(bubble);
+
+  const cursor = document.createElement('span');
+  cursor.className = 'cursor';
+  cursor.textContent = '▌';
+
+  if (msg.role === 'user') {
+    const icon = document.createElement('span');
+    icon.className = 'msg-icon';
+    icon.textContent = '🧑‍💼';
+    row.appendChild(icon);
+  }
+
+  return { row, bubble, cursor, toolPanel: null, toolPanelToolCount: 0 };
+}
+
+function updateMessageElement(el, msg, i) {
+  // Only touch innerHTML if the rendered content actually changed —
+  // avoids unnecessary reflows and keeps any nested state (like the
+  // tool panel below) untouched when only the bubble text grew.
+  const html = renderMarkdownLite(msg.content || (msg.streaming ? '…' : ''));
+  if (el.bubble.innerHTML !== html) {
+    el.bubble.innerHTML = html;
+  }
+  if (msg.streaming && el.cursor.parentNode !== el.bubble) {
+    el.bubble.appendChild(el.cursor);
+  } else if (!msg.streaming && el.cursor.parentNode === el.bubble) {
+    el.cursor.remove();
+  }
+
+  // Tool panel: only rebuild if the number of tool calls changed, or
+  // create it for the first time. Updating an existing call's status/
+  // result happens in place via updateToolPanel, so expand/collapse
+  // state (which lives inside renderToolPanel's closure) survives.
+  if (msg.toolCalls && msg.toolCalls.length) {
+    if (!el.toolPanel) {
+      el.toolPanel = renderToolPanel(msg.toolCalls);
+      el.toolPanelToolCount = msg.toolCalls.length;
+      // Insert right after this message's row.
+      el.row.after(el.toolPanel);
+    } else if (el.toolPanelToolCount !== msg.toolCalls.length) {
+      // A new tool call was added — rebuild (rare: happens once per
+      // additional parallel tool call, not per streamed token).
+      const fresh = renderToolPanel(msg.toolCalls);
+      el.toolPanel.replaceWith(fresh);
+      el.toolPanel = fresh;
+      el.toolPanelToolCount = msg.toolCalls.length;
+    } else {
+      // Same number of calls — update statuses/results in place.
+      updateToolPanelContents(el.toolPanel, msg.toolCalls);
+    }
+  }
 }
 
 function renderToolPanel(toolCalls) {
@@ -342,6 +397,7 @@ function renderToolPanel(toolCalls) {
 
   const detailsWrap = document.createElement('div');
   detailsWrap.style.display = 'none';
+  detailsWrap.className = 'tool-details-wrap';
 
   toggle.onclick = () => {
     open = !open;
@@ -349,38 +405,72 @@ function renderToolPanel(toolCalls) {
     toggle.textContent = `🔍 Agent used ${toolCalls.length} SAP tool${toolCalls.length > 1 ? 's' : ''} ${open ? '▲' : '▼'}`;
   };
 
-  for (const tc of toolCalls) {
-    const detail = document.createElement('div');
-    detail.className = 'tool-call-detail';
-
-    const row = document.createElement('div');
-    row.className = 'row';
-    const name = document.createElement('span');
-    name.textContent = `${TOOL_ICONS[tc.tool] || '⚙️'} ${tc.tool}`;
-    const status = document.createElement('span');
-    status.className = tc.status === 'running' ? 'status-running' : 'status-done';
-    status.textContent = tc.status === 'running' ? '⏳ Running…' : '✅ Done';
-    row.appendChild(name);
-    row.appendChild(status);
-    detail.appendChild(row);
-
-    const argsCode = document.createElement('code');
-    argsCode.textContent = `Params: ${JSON.stringify(tc.args)}`;
-    detail.appendChild(argsCode);
-
-    if (tc.result != null) {
-      const resultStr = JSON.stringify(tc.result);
-      const resultCode = document.createElement('code');
-      resultCode.textContent = resultStr.length > 400 ? resultStr.slice(0, 400) + '…' : resultStr;
-      detail.appendChild(resultCode);
-    }
-
-    detailsWrap.appendChild(detail);
-  }
+  toolCalls.forEach((tc, idx) => {
+    detailsWrap.appendChild(buildToolCallDetail(tc, idx));
+  });
 
   panel.appendChild(toggle);
   panel.appendChild(detailsWrap);
   return panel;
+}
+
+function buildToolCallDetail(tc, idx) {
+  const detail = document.createElement('div');
+  detail.className = 'tool-call-detail';
+  detail.dataset.toolIndex = String(idx);
+
+  const row = document.createElement('div');
+  row.className = 'row';
+  const name = document.createElement('span');
+  name.textContent = `${TOOL_ICONS[tc.tool] || '⚙️'} ${tc.tool}`;
+  const status = document.createElement('span');
+  status.className = 'tool-status ' + (tc.status === 'running' ? 'status-running' : 'status-done');
+  status.textContent = tc.status === 'running' ? '⏳ Running…' : '✅ Done';
+  row.appendChild(name);
+  row.appendChild(status);
+  detail.appendChild(row);
+
+  const argsCode = document.createElement('code');
+  argsCode.textContent = `Params: ${JSON.stringify(tc.args)}`;
+  detail.appendChild(argsCode);
+
+  if (tc.result != null) {
+    const resultStr = JSON.stringify(tc.result);
+    const resultCode = document.createElement('code');
+    resultCode.className = 'tool-result';
+    resultCode.textContent = resultStr.length > 400 ? resultStr.slice(0, 400) + '…' : resultStr;
+    detail.appendChild(resultCode);
+  }
+
+  return detail;
+}
+
+// Updates an existing tool panel's status/result text in place,
+// without removing or recreating the panel — this is what lets an
+// expanded panel stay expanded while a tool call resolves.
+function updateToolPanelContents(panel, toolCalls) {
+  const detailsWrap = panel.querySelector('.tool-details-wrap');
+  if (!detailsWrap) return;
+
+  toolCalls.forEach((tc, idx) => {
+    const detail = detailsWrap.querySelector(`.tool-call-detail[data-tool-index="${idx}"]`);
+    if (!detail) return;
+
+    const statusEl = detail.querySelector('.tool-status');
+    if (statusEl) {
+      statusEl.className = 'tool-status ' + (tc.status === 'running' ? 'status-running' : 'status-done');
+      statusEl.textContent = tc.status === 'running' ? '⏳ Running…' : '✅ Done';
+    }
+
+    const existingResult = detail.querySelector('.tool-result');
+    if (tc.result != null && !existingResult) {
+      const resultStr = JSON.stringify(tc.result);
+      const resultCode = document.createElement('code');
+      resultCode.className = 'tool-result';
+      resultCode.textContent = resultStr.length > 400 ? resultStr.slice(0, 400) + '…' : resultStr;
+      detail.appendChild(resultCode);
+    }
+  });
 }
 
 function renderPromptChips() {
