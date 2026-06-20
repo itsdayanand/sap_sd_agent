@@ -93,15 +93,24 @@ async function callSandbox(path, params, mockFixture) {
         const body = res.data?.d?.results ?? res.data?.d ?? res.data;
         return { ok: true, source: 'sandbox', data: body };
     } catch (err) {
-        if (FALLBACK_ON_FAILURE) {
-            return {
-                ok: true,
-                source: 'mock-fallback',
-                note: 'This is demo/sandbox fixture data, not a live SAP record. The lookup itself succeeded.',
-                data: mockFixture,
-            };
-        }
-        return { ok: false, error: 'Sandbox call failed.' };
+  } catch (err) {
+    console.error('[sandbox-client] Sandbox call FAILED:', {
+        url: `${SANDBOX_BASE}/${path}`,
+        status: err.response?.status,
+        statusText: err.response?.statusText,
+        responseData: JSON.stringify(err.response?.data)?.slice(0, 500),
+        message: err.message,
+    });
+
+    if (FALLBACK_ON_FAILURE) {
+        return {
+            ok: true,
+            source: 'mock-fallback',
+            note: 'This is demo/sandbox fixture data, not a live SAP record. The lookup itself succeeded.',
+            data: mockFixture,
+        };
+    }
+    return { ok: false, error: 'Sandbox call failed.' };
     }
 }
 
