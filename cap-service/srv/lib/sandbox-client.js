@@ -19,7 +19,7 @@ const FALLBACK_ON_FAILURE = process.env.FALLBACK_ON_FAILURE !== 'false';
 // Reused HTTP client with keep-alive instead of a bare axios.get per call,
 // so repeated sandbox calls in the same process reuse TCP/TLS connections.
 const http = axios.create({
-    timeout: 15000,
+    timeout: 30000,
     headers: { APIKey: SANDBOX_API_KEY, Accept: 'application/json' },
 });
 
