@@ -1,0 +1,31 @@
+{
+  "name": "sd-agent-cap-service",
+  "version": "1.0.0",
+  "description": "CAP middleware + static UI: proxies SAP Business Accelerator Hub SD OData APIs, validates input, persists chat history on a file-based SQLite DB (no HANA Cloud dependency, deliberately, for BTP trial reliability)",
+  "engines": {
+    "node": "^20"
+  },
+  "dependencies": {
+    "@sap/cds": "^7",
+    "express": "^4",
+    "axios": "^1.7.0",
+    "better-sqlite3": "^11"
+  },
+  "devDependencies": {
+    "@sap/cds-dk": "^7"
+  },
+  "scripts": {
+    "start": "cds-serve",
+    "watch": "cds watch"
+  },
+  "cds": {
+    "requires": {
+      "db": {
+        "kind": "sqlite",
+        "credentials": {
+          "url": "db/sd-agent.sqlite"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+# Node / CAP
+node_modules/
+*.sqlite
+*.sqlite-journal
+.cds-services.json
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Env files — never commit real secrets
+.env
+
+# Editor/OS
+.DS_Store
+.vscode/
+*.log

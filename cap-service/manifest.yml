@@ -1,0 +1,19 @@
+applications:
+  - name: sd-agent-cap-service
+    path: .
+    buildpacks:
+      - nodejs_buildpack
+    memory: 192M
+    instances: 1
+    env:
+      NODE_ENV: production
+      SANDBOX_API_KEY: ((sandbox_api_key))
+      FORCE_MOCK: "false"
+      FALLBACK_ON_FAILURE: "true"
+    # No "services:" section — deliberately not binding HANA Cloud.
+    # Persistence uses a file-based SQLite DB on local disk instead
+    # (see package.json "cds.requires.db"), which is more reliable on
+    # a BTP trial account where HANA Cloud entitlement/availability is
+    # inconsistent. Trade-off: this is per-instance, ephemeral storage
+    # that doesn't survive `cf push` (only app restarts) — acceptable
+    # for a demo, not for production multi-instance scaling.
