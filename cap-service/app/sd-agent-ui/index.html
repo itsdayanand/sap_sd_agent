@@ -184,7 +184,7 @@
 // ?agent=https://your-fastapi-route... for local testing.
 const AGENT_URL = (new URLSearchParams(location.search).get('agent'))
   || window.AGENT_URL
-  || 'http://localhost:8000';
+  || 'https://sd-agent-backend.cfapps.us10-001.hana.ondemand.com';
 
 const TOOL_ICONS = {
   get_sales_orders: '📋',
