@@ -6,7 +6,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 CAP_BASE_URL = os.getenv("CAP_BASE_URL", "http://localhost:4004/odata/v4/sd-agent")
-CAP_TIMEOUT_SECONDS = float(os.getenv("CAP_TIMEOUT_SECONDS", "20.0"))
+CAP_TIMEOUT_SECONDS = float(os.getenv("CAP_TIMEOUT_SECONDS", "35.0"))
 
 # Single shared client, reused across requests instead of opening a new
 # TCP/TLS connection on every call. httpx.AsyncClient is safe to share
