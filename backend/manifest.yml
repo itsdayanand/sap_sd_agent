@@ -8,12 +8,15 @@ applications:
     command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     env:
       ENV: production
-      OPENAI_API_KEY: ((openai_api_key))
+      # OPENAI_API_KEY is intentionally NOT listed here. It's set once via
+      # `cf set-env sd-agent-backend OPENAI_API_KEY <key>` and persists on
+      # the app across restarts/pushes. Listing it here as ((openai_api_key))
+      # would force `cf push` to demand --var on every single deploy, even
+      # though the real value never needs to change.
       LLM_MODEL: gpt-4o
       # CAP service route — update the subdomain after your first
       # `cf push` of cap-service shows you the actual assigned route.
       CAP_BASE_URL: https://sd-agent-cap-service.cfapps.us10-001.hana.ondemand.com/odata/v4/sdagent
       # The UI is now served BY the CAP app itself (cap-service/app/sd-agent-ui),
       # not a separate frontend app, so this points at the CAP route + UI path.
-      
       ALLOWED_ORIGINS: https://sd-agent-cap-service.cfapps.us10-001.hana.ondemand.com
