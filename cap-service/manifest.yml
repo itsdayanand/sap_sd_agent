@@ -7,7 +7,9 @@ applications:
     instances: 1
     env:
       NODE_ENV: production
-      SANDBOX_API_KEY: ((sandbox_api_key))
+      # SANDBOX_API_KEY is intentionally NOT listed here. Set it once via
+      # `cf set-env sd-agent-cap-service SANDBOX_API_KEY <key>` so it
+      # persists across restarts/pushes without needing --var every time.
       FORCE_MOCK: "false"
       FALLBACK_ON_FAILURE: "true"
     # No "services:" section — deliberately not binding HANA Cloud.
