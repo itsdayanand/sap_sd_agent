@@ -8,10 +8,10 @@ from .registry import registry
 logger = logging.getLogger(__name__)
 
 # Base URL of the CAP service (this replaces direct OData/sandbox calls).
-# Locally this is http://localhost:4004/odata/v4/sd-agent
+# Locally this is http://localhost:4004/odata/v4/sdagent
 # On BTP CF this is the CAP app's route, e.g.
-#   https://sd-agent-cap-service.cfapps.us10-001.hana.ondemand.com/odata/v4/sd-agent
-CAP_BASE_URL = os.getenv("CAP_BASE_URL", "http://localhost:4004/odata/v4/sd-agent")
+#   https://sd-agent-cap-service.cfapps.us10-001.hana.ondemand.com/odata/v4/sdagent
+CAP_BASE_URL = os.getenv("CAP_BASE_URL", "http://localhost:4004/odata/v4/sdagent")
 CAP_TIMEOUT_SECONDS = float(os.getenv("CAP_TIMEOUT_SECONDS", "35.0"))
 
 # Single shared, connection-pooled client reused across all tool calls
@@ -72,9 +72,46 @@ def _humanize(result: dict, empty_message: str) -> dict:
     if not result.get("ok"):
         return {"error": result.get("error", "Unknown error"), "message": empty_message}
     data = result.get("data")
+    total_count = result.get("totalCount")
     if isinstance(data, list) and len(data) == 0:
-        return {"message": empty_message, "data": []}
-    return {"source": result.get("source", "sandbox"), "data": data}
+        # Preserve "source" even on an empty result — without this, an
+        # empty mock-fallback result would look indistinguishable from an
+        # empty real-sandbox result, and the turn-level mock-consistency
+        # tracking in loop.py wouldn't detect that this call used mock data.
+        empty_result = {"message": empty_message, "data": [], "source": result.get("source", "sandbox")}
+        if result.get("note"):
+            empty_result["note"] = result["note"]
+        if result.get("fallbackReason"):
+            empty_result["fallbackReason"] = result["fallbackReason"]
+        return empty_result
+
+    humanized = {"source": result.get("source", "sandbox"), "data": data}
+
+    # Preserve these so the LLM can tell a deliberate Mock-mode selection
+    # (source: "mock", no fallbackReason) apart from a genuine Live-mode
+    # failure that fell back automatically (source: "mock-fallback" WITH
+    # fallbackReason "timeout"/"unreachable") — see system_prompt.py rule 8.
+    # Without this, both cases looked identical to the LLM, and a real
+    # sandbox outage in Live mode would silently present as ordinary mock
+    # data with no warning to the user.
+    if result.get("note"):
+        humanized["note"] = result["note"]
+    if result.get("fallbackReason"):
+        humanized["fallbackReason"] = result["fallbackReason"]
+
+    # totalCount comes from OData's $inlinecount=allpages — the TRUE number
+    # of matching rows, independent of how many were actually returned
+    # (capped by $top). When totalCount exceeds what's in "data", the
+    # caller only saw a partial page — surface that explicitly so the LLM
+    # doesn't present a partial result as if it were everything. Without
+    # this flag, a customer with thousands of orders would silently look
+    # identical to one with exactly 10.
+    if isinstance(data, list) and isinstance(total_count, int) and total_count > len(data):
+        humanized["totalAvailable"] = total_count
+        humanized["returnedCount"] = len(data)
+        humanized["truncated"] = True
+
+    return humanized
 
 
 # ── Tool 1: Sales Orders ─────────────────────────────────────────────
@@ -88,7 +125,14 @@ class GetSalesOrdersTool(SAPTool):
         return (
             "Retrieve sales orders from SAP S/4HANA for a given customer. "
             "Returns order ID, status, amount, and creation date. "
-            "Status codes: A=Not Started, B=Partial, C=Completed."
+            "Status codes: A=Not Started, B=Partial, C=Completed. "
+            "Returns at most 10 orders per call, sorted newest first. If "
+            "the customer has more than 10 matching orders, the result "
+            "includes 'truncated': true, 'returnedCount', and "
+            "'totalAvailable' — when present, you MUST tell the user only "
+            "a partial set was retrieved (e.g. 'showing the 10 most recent "
+            "of 10,000 total orders') rather than presenting the 10 shown "
+            "as if they were the complete order history."
         )
 
     @property
@@ -102,8 +146,10 @@ class GetSalesOrdersTool(SAPTool):
             "required": ["customerId"],
         }
 
-    async def execute(self, customerId: str, status: str = None, **kwargs) -> dict:
-        result = await call_cap_action("getSalesOrders", {"customerId": customerId, "status": status})
+    async def execute(self, customerId: str, status: str = None, force_mock: bool = False, **kwargs) -> dict:
+        result = await call_cap_action(
+            "getSalesOrders", {"customerId": customerId, "status": status, "forceMock": force_mock}
+        )
         return _humanize(result, f"No open sales orders found for customer {customerId}.")
 
 
@@ -131,8 +177,8 @@ class GetCustomerDetailsTool(SAPTool):
             "required": ["customerId"],
         }
 
-    async def execute(self, customerId: str, **kwargs) -> dict:
-        result = await call_cap_action("getCustomerDetails", {"customerId": customerId})
+    async def execute(self, customerId: str, force_mock: bool = False, **kwargs) -> dict:
+        result = await call_cap_action("getCustomerDetails", {"customerId": customerId, "forceMock": force_mock})
         return _humanize(result, f"Customer {customerId} was not found in the sandbox dataset.")
 
 
@@ -161,9 +207,10 @@ class GetPricingConditionsTool(SAPTool):
             "required": ["customerId", "materialId"],
         }
 
-    async def execute(self, customerId: str, materialId: str, **kwargs) -> dict:
+    async def execute(self, customerId: str, materialId: str, force_mock: bool = False, **kwargs) -> dict:
         result = await call_cap_action(
-            "getPricingConditions", {"customerId": customerId, "materialId": materialId}
+            "getPricingConditions",
+            {"customerId": customerId, "materialId": materialId, "forceMock": force_mock},
         )
         return _humanize(
             result,
@@ -195,8 +242,10 @@ class GetDeliveryStatusTool(SAPTool):
             "required": ["salesOrderId"],
         }
 
-    async def execute(self, salesOrderId: str, **kwargs) -> dict:
-        result = await call_cap_action("getDeliveryStatus", {"salesOrderId": salesOrderId})
+    async def execute(self, salesOrderId: str, force_mock: bool = False, **kwargs) -> dict:
+        result = await call_cap_action(
+            "getDeliveryStatus", {"salesOrderId": salesOrderId, "forceMock": force_mock}
+        )
         return _humanize(result, f"No delivery documents found for sales order {salesOrderId}.")
 
 
@@ -223,8 +272,10 @@ class GetBillingDocumentsTool(SAPTool):
             "required": ["salesOrderId"],
         }
 
-    async def execute(self, salesOrderId: str, **kwargs) -> dict:
-        result = await call_cap_action("getBillingDocuments", {"salesOrderId": salesOrderId})
+    async def execute(self, salesOrderId: str, force_mock: bool = False, **kwargs) -> dict:
+        result = await call_cap_action(
+            "getBillingDocuments", {"salesOrderId": salesOrderId, "forceMock": force_mock}
+        )
         return _humanize(result, f"No billing documents found for sales order {salesOrderId}.")
 
 

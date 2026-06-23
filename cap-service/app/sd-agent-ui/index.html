@@ -45,6 +45,12 @@
     flex-direction: column;
     padding: 12px;
     flex-shrink: 0;
+    /* min-height: 0 overrides flexbox's default min-height: auto on
+       flex items. Without it, #sidebar (a flex item of #app) is free
+       to grow taller than #app's 100vh to fit its content — including
+       a long #session-list — instead of being constrained to the
+       viewport so its own children's overflow rules can take effect. */
+    min-height: 0;
   }
   #sidebar .brand { display: flex; align-items: center; gap: 8px; padding: 4px 4px 16px; }
   #sidebar .brand-title { font-weight: 700; font-size: 14px; }
@@ -53,13 +59,56 @@
     background: var(--accent); color: #1a1208; border: none; border-radius: 6px;
     padding: 8px 12px; font-weight: 600; font-size: 13px; margin-bottom: 12px;
   }
-  #session-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+  #session-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    /* Same fix as #sidebar above, one level deeper: #session-list is
+       itself a flex child (of #sidebar) with flex: 1 and overflow-y:
+       auto, but a flex child's default min-height: auto lets it expand
+       to fit all of its content instead of clamping to its flex-basis.
+       That silently defeats overflow-y: auto — the scrollbar never
+       appears because the box never actually gets shorter than its
+       content; #sidebar (and the whole page) just grows past the
+       viewport instead. min-height: 0 is the standard fix for nested
+       scrollable flex columns. */
+    min-height: 0;
+  }
+  .session-row {
+    display: flex; align-items: center; gap: 2px;
+    border-radius: 6px;
+  }
+  .session-row.active { background: var(--surface-raised); }
   .session-item {
+    flex: 1; min-width: 0;
     text-align: left; background: transparent; border: none; border-radius: 6px;
     padding: 8px 10px; color: var(--text); font-size: 13px;
+    /* Buttons inherit an inconsistent default line-height from the
+       browser's UA stylesheet for form controls — tighter than the
+       body's 1.5 in some rendering contexts. That let each row's text
+       sit lower in its box than expected, so descenders visually
+       overlapped the row below even with #session-list's 4px gap
+       intact. Setting line-height explicitly removes the browser
+       default from the equation. */
+    line-height: 1.4;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .session-item.active { background: var(--surface-raised); }
+  .session-rename-btn {
+    flex-shrink: 0; background: transparent; border: none;
+    padding: 6px 8px; font-size: 12px; border-radius: 6px;
+    opacity: 0; transition: opacity 0.1s;
+  }
+  /* Only show the pencil on hover/focus of the row it belongs to —
+     keeps the sidebar visually quiet when the person isn't interacting
+     with it, rather than permanently showing 50 little pencil icons. */
+  .session-row:hover .session-rename-btn,
+  .session-rename-btn:focus-visible {
+    opacity: 1;
+  }
+  .session-rename-btn:hover { background: var(--surface); }
+  .session-delete-btn:hover { background: rgba(217, 99, 107, 0.15); }
   #cap-status { font-size: 11px; color: var(--text-dim); border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px; }
 
   /* ── Main chat column ───────────────────────────────────────── */
@@ -75,6 +124,26 @@
     border-radius: 6px; padding: 6px 12px; font-size: 12px;
   }
   .header-btn:disabled { opacity: 0.5; cursor: default; }
+
+  /* ── Data source toggle (Live / Mock) ───────────────────────── */
+  #source-toggle {
+    display: flex; align-items: center; gap: 4px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 999px; padding: 3px; margin-right: 8px;
+  }
+  #source-toggle label {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 12px; padding: 4px 10px; border-radius: 999px;
+    cursor: pointer; color: var(--text-dim); user-select: none;
+  }
+  #source-toggle input[type="radio"] { display: none; }
+  #source-toggle input[type="radio"]:checked + span {
+    color: #1a1208;
+  }
+  #source-toggle label:has(input:checked) {
+    background: var(--accent);
+  }
+  #source-toggle label:has(input:checked) span { color: #1a1208; font-weight: 600; }
 
   #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
   .empty-hint { color: var(--text-dim); font-size: 13px; padding: 8px 4px 4px; }
@@ -94,13 +163,24 @@
   /* ── Tool call panel ────────────────────────────────────────── */
   .tool-panel {
     margin: 4px 0 0 40px; border-radius: 6px; border: 1px solid var(--border);
-    overflow: hidden; font-size: 13px; background: var(--surface);
+    font-size: 13px; background: var(--surface);
+    /* flex-shrink: 0 is the key fix here — #messages is a flex column
+       with overflow-y: auto, and without this, a block child combined
+       with overflow:hidden could get squeezed to fit the container's
+       remaining visible height instead of growing to fit all of its
+       content. That capped the panel's height once there were enough
+       tool calls to exceed the visible chat area, silently clipping
+       the bottom entries even though they existed in the DOM. */
+    flex-shrink: 0;
   }
   .tool-panel-toggle {
     width: 100%; padding: 8px 12px; text-align: left; color: var(--text-dim);
     background: transparent; border: none; display: flex; align-items: center; gap: 8px;
+    border-radius: 6px 6px 0 0;
   }
+  .tool-details-wrap { border-radius: 0 0 6px 6px; overflow: hidden; }
   .tool-call-detail { padding: 8px 12px; border-top: 1px solid var(--border); }
+  .tool-call-detail:last-child { border-radius: 0 0 6px 6px; }
   .tool-call-detail .row { display: flex; justify-content: space-between; margin-bottom: 4px; font-weight: 600; }
   .tool-call-detail .status-running { color: var(--warn); }
   .tool-call-detail .status-done { color: var(--success); }
@@ -151,7 +231,17 @@
           <h1>SD Order Intelligence Agent</h1>
           <p>CAP · FastAPI · GPT-4o · SQLite · SAP S/4HANA Sandbox</p>
         </div>
-        <div style="display:flex; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div id="source-toggle">
+            <label>
+              <input type="radio" name="data-source" id="source-live" value="live" checked />
+              <span>🟢 Live</span>
+            </label>
+            <label>
+              <input type="radio" name="data-source" id="source-mock" value="mock" />
+              <span>🧪 Mock</span>
+            </label>
+          </div>
           <button id="copy-btn" class="header-btn" disabled>Copy</button>
           <button id="clear-btn" class="header-btn" disabled>Clear</button>
         </div>
@@ -225,11 +315,45 @@ function registerSessionIfNew(id, label) {
   saveSessionsList(sessions);
 }
 
+// Updates a session's stored label in place. Used both by the rename-
+// on-click flow in the sidebar and (indirectly) by createNewSession's
+// optional name prompt. Silently no-ops if the id isn't found, since a
+// rename racing a "Clear"/delete elsewhere shouldn't throw.
+function renameSession(id, newLabel) {
+  const trimmed = (newLabel || '').trim();
+  if (!trimmed) return;
+  const sessions = listSessions();
+  const session = sessions.find(s => s.id === id);
+  if (!session) return;
+  session.label = trimmed.slice(0, 60);
+  saveSessionsList(sessions);
+}
+
+// Removes a session from the local sidebar list only — this does NOT
+// delete the underlying ChatSessions/ChatMessages rows in CAP/SQLite,
+// since there's no DELETE action exposed for that on the backend today.
+// Functionally this just "hides" the conversation from this browser's
+// sidebar; the transcript itself is untouched server-side, which is a
+// deliberately conservative default (no destructive server call wired
+// to a single client-side click) until/unless an explicit delete
+// endpoint is added.
+function deleteSessionFromList(id) {
+  const sessions = listSessions().filter(s => s.id !== id);
+  saveSessionsList(sessions);
+}
+
 async function fetchNewSessionId() {
   const res = await fetch(`${AGENT_URL}/api/session/new`, { method: 'POST' });
   if (!res.ok) throw new Error('Could not start a new session.');
   const data = await res.json();
   return data.session_id;
+}
+
+async function fetchSessionHistory(id) {
+  const res = await fetch(`${AGENT_URL}/api/session/${id}/history`);
+  if (!res.ok) throw new Error('Could not load this conversation.');
+  const data = await res.json();
+  return data.messages || [];
 }
 
 async function getOrCreateSessionId() {
@@ -240,11 +364,11 @@ async function getOrCreateSessionId() {
   return id;
 }
 
-async function createNewSession() {
+async function createNewSession(initialLabel) {
   const id = await fetchNewSessionId();
   sessionStorage.setItem(SESSION_KEY, id);
   const sessions = listSessions();
-  sessions.unshift({ id, label: 'New conversation', createdAt: Date.now() });
+  sessions.unshift({ id, label: (initialLabel || 'New conversation').slice(0, 60), createdAt: Date.now() });
   saveSessionsList(sessions);
   return id;
 }
@@ -373,8 +497,8 @@ function updateMessageElement(el, msg, i) {
       // Insert right after this message's row.
       el.row.after(el.toolPanel);
     } else if (el.toolPanelToolCount !== msg.toolCalls.length) {
-      // A new tool call was added — rebuild (rare: happens once per
-      // additional parallel tool call, not per streamed token).
+      // Tool call count changed (e.g. a new concurrent tool call was
+      // added) — rebuild.
       const fresh = renderToolPanel(msg.toolCalls);
       el.toolPanel.replaceWith(fresh);
       el.toolPanel = fresh;
@@ -383,6 +507,13 @@ function updateMessageElement(el, msg, i) {
       // Same number of calls — update statuses/results in place.
       updateToolPanelContents(el.toolPanel, msg.toolCalls);
     }
+  } else if (el.toolPanel) {
+    // Defensive: toolCalls is empty but a panel still exists. Shouldn't
+    // happen in normal flow (toolCalls only grows within a turn), but
+    // remove any stale panel rather than leave one frozen on screen.
+    el.toolPanel.remove();
+    el.toolPanel = null;
+    el.toolPanelToolCount = 0;
   }
 }
 
@@ -479,7 +610,16 @@ function renderPromptChips() {
     const chip = document.createElement('button');
     chip.className = 'chip';
     chip.textContent = p;
-    chip.onclick = () => sendMessage(p);
+    chip.onclick = () => {
+      // Populate the input for editing (e.g. swapping in a real
+      // customer/order ID from the sandbox) rather than sending
+      // immediately — the person can tweak numbers before pressing
+      // Enter or the send button.
+      composerInput.value = p;
+      composerInput.focus();
+      // Place the cursor at the end so editing feels natural.
+      composerInput.setSelectionRange(p.length, p.length);
+    };
     promptChipsEl.appendChild(chip);
   }
 }
@@ -497,12 +637,59 @@ function renderSessionList() {
     return;
   }
   for (const s of sessions) {
+    // Wrap the session button and its rename control in a row so the
+    // pencil icon can sit flush against the right edge without
+    // affecting the button's own click target or text truncation.
+    const row = document.createElement('div');
+    row.className = 'session-row' + (s.id === sessionId ? ' active' : '');
+
     const btn = document.createElement('button');
-    btn.className = 'session-item' + (s.id === sessionId ? ' active' : '');
+    btn.className = 'session-item';
     btn.textContent = s.label;
     btn.title = s.label;
     btn.onclick = () => switchSession(s.id);
-    sessionListEl.appendChild(btn);
+    row.appendChild(btn);
+
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'session-rename-btn';
+    renameBtn.textContent = '✏️';
+    renameBtn.title = 'Rename conversation';
+    renameBtn.onclick = (e) => {
+      // Stop propagation so clicking the pencil never also triggers
+      // switchSession via the row beneath it.
+      e.stopPropagation();
+      const next = window.prompt('Rename conversation', s.label);
+      if (next === null) return; // person cancelled
+      renameSession(s.id, next);
+      renderSessionList();
+    };
+    row.appendChild(renameBtn);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'session-rename-btn session-delete-btn';
+    deleteBtn.textContent = '🗑️';
+    deleteBtn.title = 'Delete conversation';
+    deleteBtn.onclick = (e) => {
+      e.stopPropagation();
+      const confirmed = window.confirm(`Delete "${s.label}"? This removes it from your sidebar (the saved transcript on the server is not deleted).`);
+      if (!confirmed) return;
+      deleteSessionFromList(s.id);
+      if (s.id === sessionId) {
+        // The deleted session was the one currently open — clear the
+        // chat view rather than leaving a stale conversation on screen
+        // with no corresponding sidebar entry. sessionId is left as-is
+        // (not cleared/reset) since the underlying session+history
+        // still exists server-side; only the local sidebar shortcut
+        // to it is gone. Sending a new message here will still work,
+        // it just won't be one-click-reachable from the sidebar anymore.
+        messages = [];
+        renderMessages();
+      }
+      renderSessionList();
+    };
+    row.appendChild(deleteBtn);
+
+    sessionListEl.appendChild(row);
   }
 }
 
@@ -513,7 +700,19 @@ async function parseSSEStream(response, callbacks) {
   if (!response.body) { callbacks.onError('No response body from server.'); return; }
   if (!response.ok) {
     let detail = '';
-    try { detail = (await response.json()).detail || ''; } catch {}
+    try {
+      const body = await response.json();
+      if (typeof body.detail === 'string') {
+        // A plain HTTPException(detail="...") — the common case.
+        detail = body.detail;
+      } else if (Array.isArray(body.detail)) {
+        // Pydantic validation errors return detail as an array of
+        // {type, loc, msg, ...} objects, not a string. Concatenating
+        // that array directly into a template string previously produced
+        // the literal text "[object Object]" instead of anything useful.
+        detail = body.detail.map(d => d.msg || JSON.stringify(d)).join('; ');
+      }
+    } catch {}
     callbacks.onError(detail || `Server returned ${response.status}.`);
     return;
   }
@@ -551,6 +750,21 @@ async function parseSSEStream(response, callbacks) {
 async function sendMessage(overrideText) {
   const text = (overrideText ?? composerInput.value).trim();
   if (!text || isStreaming) return;
+
+  if (!sessionId) {
+    // Startup's session fetch may have failed (e.g. backend was asleep).
+    // Try once more right here rather than sending a request the backend
+    // will just reject — this also recovers automatically once the
+    // backend wakes up, without the person needing to refresh the page.
+    try {
+      sessionId = await getOrCreateSessionId();
+    } catch (err) {
+      messages.push({ role: 'assistant', content: '⚠️ Could not start a session — the backend may be waking up. Please try again in a few seconds.', toolCalls: [] });
+      renderMessages();
+      return;
+    }
+  }
+
   composerInput.value = '';
   isStreaming = true;
   sendBtn.textContent = '⏳';
@@ -565,12 +779,13 @@ async function sendMessage(overrideText) {
   renderMessages();
 
   const lastIdx = () => messages.length - 1;
+  const forceMock = document.getElementById('source-mock').checked;
 
   try {
     const res = await fetch(`${AGENT_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, history, session_id: sessionId }),
+      body: JSON.stringify({ message: text, history, session_id: sessionId, force_mock: forceMock }),
     });
 
     await parseSSEStream(res, {
@@ -620,12 +835,26 @@ function resetComposer() {
 // ──────────────────────────────────────────────────────────────────
 // Session switching / CAP health check
 // ──────────────────────────────────────────────────────────────────
-function switchSession(id) {
+async function switchSession(id) {
   sessionStorage.setItem(SESSION_KEY, id);
   sessionId = id;
-  messages = [];
+  // Show a brief loading state rather than an empty screen — this used
+  // to just clear messages and stop, with no fetch ever happening, so an
+  // old conversation appeared to "not load" when clicked.
+  messages = [{ role: 'assistant', content: '…', toolCalls: [] }];
   renderMessages();
   renderSessionList();
+
+  try {
+    const history = await fetchSessionHistory(id);
+    messages = history.map(m => ({ role: m.role, content: m.content, toolCalls: [] }));
+    if (messages.length === 0) {
+      messages = [];
+    }
+  } catch (err) {
+    messages = [{ role: 'assistant', content: `⚠️ ${err.message || 'Could not load this conversation.'}`, toolCalls: [] }];
+  }
+  renderMessages();
 }
 
 async function checkCapHealth() {
@@ -646,7 +875,11 @@ async function checkCapHealth() {
 // Wiring
 // ──────────────────────────────────────────────────────────────────
 document.getElementById('new-session-btn').onclick = async () => {
-  sessionId = await createNewSession();
+  // Prompt is optional — cancelling or leaving it blank falls back to
+  // the default 'New conversation' label, same as before this feature
+  // existed, so this never blocks the common "just start chatting" flow.
+  const name = window.prompt('Name this conversation (optional)', '');
+  sessionId = await createNewSession(name);
   messages = [];
   renderMessages();
   renderSessionList();
@@ -667,8 +900,23 @@ composerInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMe
 
 (async function init() {
   renderPromptChips();
-  sessionId = await getOrCreateSessionId();
+  // Render whatever sessions are already saved locally FIRST, before any
+  // network call — this is what was missing before. The old code awaited
+  // getOrCreateSessionId() with no error handling; if that fetch failed
+  // (e.g. backend briefly asleep), the exception stopped init() entirely
+  // and renderSessionList() never ran at all, leaving an empty/broken
+  // sidebar with no scrollbar since there was nothing to scroll.
   renderSessionList();
+  try {
+    sessionId = await getOrCreateSessionId();
+  } catch (err) {
+    console.error('Could not start a session:', err);
+    capStatusValueEl.textContent = 'session error';
+    capStatusValueEl.style.color = 'var(--error)';
+    // Still let the person retry by sending a message later — sendMessage
+    // re-checks for a session id and surfaces a clear error if it's still
+    // missing, rather than leaving the whole page silently broken.
+  }
   renderMessages();
   checkCapHealth();
 })();

@@ -14,6 +14,7 @@ from .api.chat import router as chat_router
 from .api.health import router as health_router
 from .api.tools import router as tools_router
 from .api.session import router as session_router
+from .api.session_history import router as session_history_router
 from .tools.sap_tools import register_all_tools, aclose_client as aclose_tools_client
 from .agent.memory import aclose_client as aclose_memory_client
 
@@ -76,5 +77,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 app.include_router(health_router)
 app.include_router(session_router, prefix="/api")
+app.include_router(session_history_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(tools_router, prefix="/api")

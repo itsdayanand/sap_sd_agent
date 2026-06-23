@@ -24,17 +24,17 @@ service SDAgentService {
     ) returns String;
 
     // ── Tool 1 ──────────────────────────────────────────────
-    action getSalesOrders(customerId: String(10) not null, status: String(1)) returns String;
+    action getSalesOrders(customerId: String(10) not null, status: String(1), forceMock: Boolean) returns String;
 
     // ── Tool 2 ──────────────────────────────────────────────
-    action getCustomerDetails(customerId: String(10) not null) returns String;
+    action getCustomerDetails(customerId: String(10) not null, forceMock: Boolean) returns String;
 
     // ── Tool 3 ──────────────────────────────────────────────
-    action getPricingConditions(customerId: String(10) not null, materialId: String(40) not null) returns String;
+    action getPricingConditions(customerId: String(10) not null, materialId: String(40) not null, forceMock: Boolean) returns String;
 
     // ── Tool 4 ──────────────────────────────────────────────
-    action getDeliveryStatus(salesOrderId: String(10) not null) returns String;
+    action getDeliveryStatus(salesOrderId: String(10) not null, forceMock: Boolean) returns String;
 
     // ── Tool 5 ──────────────────────────────────────────────
-    action getBillingDocuments(salesOrderId: String(10) not null) returns String;
+    action getBillingDocuments(salesOrderId: String(10) not null, forceMock: Boolean) returns String;
 }

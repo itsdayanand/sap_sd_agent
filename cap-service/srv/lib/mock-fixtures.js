@@ -2,6 +2,12 @@
 // sandbox responses, so a demo audience sees realistic-looking output
 // even if the sandbox API is rate-limited or unreachable.
 
+// Simulates a customer with a large order history, so the "showing 10 of
+// N, more exist" truncation-warning behavior can be demoed in Mock mode
+// without needing a real sandbox customer that actually has this many
+// orders. Real customers in the sandbox normally have only a handful.
+const MOCK_TOTAL_ORDER_COUNT = 10000;
+
 const salesOrders = (customerId, status) => [
     {
         SalesOrder: '10', SoldToParty: customerId, SalesOrderType: 'OR',
@@ -55,5 +61,6 @@ module.exports = {
     customerDetails,
     pricingConditions,
     deliveryStatus,
-    billingDocuments
+    billingDocuments,
+    MOCK_TOTAL_ORDER_COUNT
 };

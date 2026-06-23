@@ -6,11 +6,12 @@
     "node": "^20"
   },
   "dependencies": {
+    "@cap-js/sqlite": "^1.11.1",
     "@sap/cds": "^7",
-     "@sap/xssec": "^4",
-    "express": "^4",
+    "@sap/xssec": "^4",
     "axios": "^1.7.0",
-    "better-sqlite3": "^11"
+    "better-sqlite3": "^11",
+    "express": "^4"
   },
   "devDependencies": {
     "@sap/cds-dk": "^7"
@@ -27,7 +28,7 @@
           "url": "db/sd-agent.sqlite"
         }
       },
-       "auth": {
+      "auth": {
         "kind": "dummy"
       }
     }

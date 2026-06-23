@@ -47,7 +47,7 @@ module.exports = cds.service.impl(async function () {
 
     // ── Tool 1: Sales Orders ───────────────────────────────────────
     this.on('getSalesOrders', async (req) => {
-        const { customerId, status } = req.data;
+        const { customerId, status, forceMock } = req.data;
         try {
             validateCustomerId(customerId);
             validateStatus(status);
@@ -64,9 +64,12 @@ module.exports = cds.service.impl(async function () {
                 '$filter': filters.join(' and '),
                 '$select': 'SalesOrder,SoldToParty,SalesOrderType,OverallSDProcessStatus,CreationDate,TotalNetAmount,TransactionCurrency',
                 '$top': '10',
-                '$orderby': 'CreationDate desc'
+                '$orderby': 'CreationDate desc',
+                '$inlinecount': 'allpages'
             },
-            fixtures.salesOrders(customerId, status)
+            fixtures.salesOrders(customerId, status),
+            forceMock,
+            fixtures.MOCK_TOTAL_ORDER_COUNT
         );
 
         return JSON.stringify(result);
@@ -74,7 +77,7 @@ module.exports = cds.service.impl(async function () {
 
     // ── Tool 2: Customer Details ───────────────────────────────────
     this.on('getCustomerDetails', async (req) => {
-        const { customerId } = req.data;
+        const { customerId, forceMock } = req.data;
         try {
             validateCustomerId(customerId);
         } catch (e) {
@@ -84,7 +87,8 @@ module.exports = cds.service.impl(async function () {
         const result = await callSandbox(
             `API_BUSINESS_PARTNER/A_BusinessPartner('${customerId}')`,
             { '$select': 'BusinessPartner,BusinessPartnerFullName,BusinessPartnerType,BusinessPartnerIsBlocked' },
-            fixtures.customerDetails(customerId)
+            fixtures.customerDetails(customerId),
+            forceMock
         );
 
         return JSON.stringify(result);
@@ -92,7 +96,7 @@ module.exports = cds.service.impl(async function () {
 
     // ── Tool 3: Pricing Conditions ──────────────────────────────────
     this.on('getPricingConditions', async (req) => {
-        const { customerId, materialId } = req.data;
+        const { customerId, materialId, forceMock } = req.data;
         try {
             validateCustomerId(customerId);
             validateMaterialId(materialId);
@@ -107,7 +111,8 @@ module.exports = cds.service.impl(async function () {
                 '$select': 'ConditionType,ConditionRateValue,ConditionCurrency,Customer,Material',
                 '$top': '10'
             },
-            fixtures.pricingConditions(customerId, materialId)
+            fixtures.pricingConditions(customerId, materialId),
+            forceMock
         );
 
         return JSON.stringify(result);
@@ -115,7 +120,7 @@ module.exports = cds.service.impl(async function () {
 
     // ── Tool 4: Delivery Status ──────────────────────────────────────
     this.on('getDeliveryStatus', async (req) => {
-        const { salesOrderId } = req.data;
+        const { salesOrderId, forceMock } = req.data;
         try {
             validateSalesOrderId(salesOrderId);
         } catch (e) {
@@ -129,7 +134,8 @@ module.exports = cds.service.impl(async function () {
                 '$select': 'DeliveryDocument,SalesOrder,OverallDeliveryStatus,GoodsIssueTime,ShippingPoint',
                 '$top': '5'
             },
-            fixtures.deliveryStatus(salesOrderId)
+            fixtures.deliveryStatus(salesOrderId),
+            forceMock
         );
 
         return JSON.stringify(result);
@@ -137,7 +143,7 @@ module.exports = cds.service.impl(async function () {
 
     // ── Tool 5: Billing Documents ─────────────────────────────────────
     this.on('getBillingDocuments', async (req) => {
-        const { salesOrderId } = req.data;
+        const { salesOrderId, forceMock } = req.data;
         try {
             validateSalesOrderId(salesOrderId);
         } catch (e) {
@@ -151,7 +157,8 @@ module.exports = cds.service.impl(async function () {
                 '$select': 'BillingDocument,SalesOrder,BillingDocumentDate,NetAmount,TransactionCurrency,PaymentStatus',
                 '$top': '5'
             },
-            fixtures.billingDocuments(salesOrderId)
+            fixtures.billingDocuments(salesOrderId),
+            forceMock
         );
 
         return JSON.stringify(result);

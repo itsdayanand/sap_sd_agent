@@ -121,6 +121,24 @@ async def load_history(session_id: str) -> list:
             return []
         cap_key = rows[0]["ID"]
 
+        # cap_key is a CAP cuid, and CDS exposes cuid's ID column as
+        # Edm.Guid in the OData metadata — NOT Edm.String.
+        #
+        # Three attempts at this filter, in order, each failing differently:
+        #   1. `session_ID eq {cap_key}`            -> looked like invalid
+        #      syntax to the underlying sqlite3 driver issue at the time,
+        #      masked by an unrelated module-loading bug (see git history).
+        #   2. `session_ID eq '{cap_key}'`           -> valid OData string
+        #      literal syntax, but CAP rejected it: "The type 'Edm.Guid' is
+        #      not compatible to 'Edm.String'" — session_ID is Guid-typed.
+        #   3. `session_ID eq guid'{cap_key}'`       -> the OData V4 spec's
+        #      standard typed-literal syntax for GUIDs — but CAP's OData
+        #      adapter (OKRA, the legacy V4 server bundled with @sap/cds)
+        #      doesn't recognize the `guid'...'` prefix form; it tokenizes
+        #      `guid` as a bare property reference instead, giving
+        #      "Property 'guid' does not exist in type ...".
+        # The actual working form for this implementation: a bare,
+        # completely unquoted UUID — no quotes, no type prefix at all.
         msg_res = await client.get(
             f"{CAP_BASE_URL}/ChatMessages",
             params={
@@ -136,5 +154,10 @@ async def load_history(session_id: str) -> list:
             if m["role"] in ("user", "assistant")
         ]
     except Exception:
-        logger.warning("Failed to load history for session %s (CAP/HANA unreachable?)", session_id)
+        # exc_info=True so a future regression in this query shows the
+        # actual underlying error (e.g. a CAP 400 from a malformed
+        # $filter) in the logs, instead of only this generic message —
+        # that distinction is what would have caught the bug above
+        # immediately instead of needing a manual trace through four files.
+        logger.warning("Failed to load history for session %s (CAP/HANA unreachable?)", session_id, exc_info=True)
         return []

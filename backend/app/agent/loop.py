@@ -88,7 +88,12 @@ async def run_agent(user_message: str, history: list, session_id: str) -> AsyncG
         cap_session_key = await memory.ensure_session(session_id)
         await memory.save_message(cap_session_key, "user", user_message)
     except Exception:
-        logger.warning("Could not persist user turn for session %s (CAP/HANA unreachable?)", session_id)
+        # exc_info=True surfaces the actual underlying error (e.g. a
+        # 4xx/5xx from CAP, a connection failure, a bad response shape)
+        # instead of only this generic message — without it, "message
+        # never gets persisted" produces no diagnosable signal anywhere,
+        # which is exactly what made this bug invisible until now.
+        logger.warning("Could not persist user turn for session %s (CAP/HANA unreachable?)", session_id, exc_info=True)
 
     tool_calls_log = []
     final_answer_text = ""
@@ -181,14 +186,23 @@ async def run_agent(user_message: str, history: list, session_id: str) -> AsyncG
             for i in range(0, len(content), chunk_size):
                 yield _sse({"type": "token", "content": content[i : i + chunk_size], "session_id": session_id})
 
-        yield _sse({"type": "done", "session_id": session_id, "tool_calls": tool_calls_log})
-
-        # Best-effort persistence of the assistant's final turn
+        # Best-effort persistence of the assistant's final turn.
+        # This MUST happen before the 'done' event is yielded below, not
+        # after. run_agent is an async generator feeding a StreamingResponse;
+        # once 'done' is yielded, the frontend has everything it needs and
+        # stops reading the stream. If the underlying connection gets torn
+        # down at that point (browser, proxy, or Gorouter closing an
+        # apparently-finished response), an async generator's code AFTER
+        # its final yield is not guaranteed to run to completion — so a
+        # save placed after 'done' races the teardown and can simply never
+        # execute, with no exception raised anywhere to explain why.
         if cap_session_key and final_answer_text:
             try:
                 await memory.save_message(cap_session_key, "assistant", final_answer_text, tool_calls_log)
             except Exception:
-                logger.warning("Could not persist assistant turn for session %s", session_id)
+                logger.warning("Could not persist assistant turn for session %s", session_id, exc_info=True)
+
+        yield _sse({"type": "done", "session_id": session_id, "tool_calls": tool_calls_log})
 
     except Exception:
         # Never leak internal exception text (stack details, internal

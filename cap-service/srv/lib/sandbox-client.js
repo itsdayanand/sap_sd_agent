@@ -76,39 +76,70 @@ function validateStatus(status) {
  *
  * - FORCE_MOCK=true            -> always returns fixture data, no network call.
  * - no SANDBOX_API_KEY set     -> always returns fixture data (can't call sandbox anyway).
+ * - forceMock=true (per-call)  -> same as FORCE_MOCK but scoped to one call,
+ *                                  used so a multi-tool agent turn stays
+ *                                  consistently mock once any earlier call
+ *                                  in that same turn fell back, rather than
+ *                                  mixing real and fixture data in one answer.
  * - real call fails AND
  *   FALLBACK_ON_FAILURE=true   -> returns fixture data, clearly flagged as a fallback.
  * - real call fails AND
  *   FALLBACK_ON_FAILURE=false  -> returns { ok: false, error }.
  */
-async function callSandbox(path, params, mockFixture) {
-    if (FORCE_MOCK || !SANDBOX_API_KEY) {
-        return { ok: true, source: 'mock', data: mockFixture };
+async function callSandbox(path, params, mockFixture, forceMock = false, mockTotalCount = undefined) {
+    if (FORCE_MOCK || forceMock || !SANDBOX_API_KEY) {
+        return {
+            ok: true,
+            source: forceMock ? 'mock-fallback' : 'mock',
+            data: mockFixture,
+            ...(mockTotalCount !== undefined ? { totalCount: mockTotalCount } : {}),
+        };
     }
+
     try {
         const res = await http.get(`${SANDBOX_BASE}/${path}`, {
             params: { '$format': 'json', ...params },
         });
         const body = res.data?.d?.results ?? res.data?.d ?? res.data;
-        return { ok: true, source: 'sandbox', data: body };
-   } catch (err) {
-    console.error('[sandbox-client] Sandbox call FAILED:', {
-        url: `${SANDBOX_BASE}/${path}`,
-        status: err.response?.status,
-        statusText: err.response?.statusText,
-        responseData: JSON.stringify(err.response?.data)?.slice(0, 500),
-        message: err.message,
-    });
-
-    if (FALLBACK_ON_FAILURE) {
+        // When the caller requested $inlinecount=allpages, OData puts the
+        // TOTAL matching row count here (e.g. "10000"), separate from how
+        // many rows are actually returned (capped by $top). Without this,
+        // a customer with thousands of orders would see only the first
+        // page with no indication anything was left out.
+        const totalCount = res.data?.d?.__count;
         return {
             ok: true,
-            source: 'mock-fallback',
-            note: 'This is demo/sandbox fixture data, not a live SAP record. The lookup itself succeeded.',
-            data: mockFixture,
+            source: 'sandbox',
+            data: body,
+            ...(totalCount !== undefined ? { totalCount: parseInt(totalCount, 10) } : {}),
         };
-    }
-    return { ok: false, error: 'Sandbox call failed.' };
+    } catch (err) {
+        // TEMPORARY diagnostic logging — remove once sandbox connectivity
+        // is confirmed working. Logs status code + response body since
+        // those reveal auth/key issues that err.message alone hides.
+        console.error('[sandbox-client] Sandbox call FAILED:', {
+            url: `${SANDBOX_BASE}/${path}`,
+            status: err.response?.status,
+            statusText: err.response?.statusText,
+            responseData: JSON.stringify(err.response?.data)?.slice(0, 500),
+            message: err.message,
+        });
+
+        const isTimeout = err.code === 'ECONNABORTED' || /timeout/i.test(err.message || '');
+        const reason = isTimeout
+            ? 'The SAP sandbox did not respond in time (network too slow / timed out).'
+            : 'The SAP sandbox could not be reached.';
+
+        if (FALLBACK_ON_FAILURE) {
+            return {
+                ok: true,
+                source: 'mock-fallback',
+                note: `${reason} Showing demo/fixture data instead so the conversation can continue.`,
+                fallbackReason: isTimeout ? 'timeout' : 'unreachable',
+                data: mockFixture,
+            };
+        }
+        return { ok: false, error: 'Sandbox call failed.' };
     }
 }
 
