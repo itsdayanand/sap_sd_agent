@@ -75,6 +75,22 @@ first time you `npm install`, which needs normal internet access to
 `nodejs.org`. This works fine on a normal dev machine or BTP's buildpack —
 it only fails in network-locked-down environments (e.g. some CI sandboxes).
 
+**`better-sqlite3` alone is not enough — `@cap-js/sqlite` must also be a
+dependency.** `package.json`'s `cds.requires.db.kind` is set to `"sqlite"`.
+In CDS 7.x, that `kind` is resolved by the **`@cap-js/sqlite`** plugin
+package, which uses `better-sqlite3` internally as its native driver —
+`better-sqlite3` by itself does not register a CDS database service
+implementation. If `@cap-js/sqlite` is missing from `dependencies`, CDS
+falls back to trying to `require('sqlite3')` (a different, older package
+that was never installed), and the app crashes at startup with
+`Cannot find module 'sqlite3'`. `package.json` must list both:
+```json
+"dependencies": {
+  "better-sqlite3": "^11",
+  "@cap-js/sqlite": "^1"
+}
+```
+
 ## 2. FastAPI backend
 
 ```bash
@@ -108,6 +124,39 @@ either:
 
 ---
 
+## ⚠️ Critical gotcha: OData `$filter` on GUID-typed fields needs a bare, unquoted literal
+
+This one caused a very long debugging session (six files deep, multiple
+false fixes) and is **not documented anywhere obvious**, so it's recorded
+here in full detail for anyone touching `backend/app/agent/memory.py`.
+
+CDS's `cuid` mixin (used by both `ChatSessions` and `ChatMessages`)
+generates an `ID : UUID` key, which CDS 7.x exposes over OData as
+**`Edm.Guid`** — not `Edm.String`. `ChatMessages.session_ID` (the
+auto-generated foreign key from the `session : Association to ChatSessions`
+field) is also `Edm.Guid`.
+
+CAP's bundled OData V4 server (**OKRA**, the parser shipped with
+`@sap/cds`) does **not** follow the OData V4 spec's own typed-literal
+syntax for GUIDs in this version. Here's exactly what was tried, in order,
+and what happened:
+
+| `$filter` value tried | Result |
+|---|---|
+| `session_ID eq {value}` (unquoted, no thought given to type) | Initially looked broken, but was actually masked entirely by the missing-`@cap-js/sqlite` crash above — never properly isolated until that was fixed. |
+| `session_ID eq '{value}'` (standard string literal) | **400**: `The type 'Edm.Guid' is not compatible to 'Edm.String'` |
+| `session_ID eq guid'{value}'` (OData V4 spec's standard GUID literal syntax) | **400**: `Property 'guid' does not exist in type 'SDAgentService.ChatMessages'` — OKRA's parser doesn't recognize the `guid'...'` prefix at all; it tokenizes `guid` as a bare property reference instead. |
+| **`session_ID eq {value}` — bare UUID, completely unquoted, no prefix** | ✅ **Works.** This is the only form OKRA accepts for `Edm.Guid` equality comparisons. |
+
+**Rule going forward: never quote a GUID value in `$filter` against this
+CAP service, and never use the `guid'...'` prefix. Use the bare value.**
+`label` on `ChatSessions`, by contrast, is a plain `String(100)` —
+`Edm.String` — and correctly uses standard single-quote string-literal
+syntax (`label eq '{value}'`, with `''`-doubling for embedded quotes). The
+two columns' filter syntax is not interchangeable.
+
+---
+
 ## What changed vs. the original Joule output
 
 | Area | Original Joule code | This implementation |
@@ -125,6 +174,8 @@ either:
 | Frontend | Missing entirely | Single static HTML/JS file, no build step, served by CAP — chosen over React/Vite deliberately (see above) |
 | Frontend session persistence | N/A | Server-issued UUID via `/api/session/new`, persisted via `sessionStorage` + sidebar history list |
 | CORS | N/A | Scoped to `GET`/`POST` + `Content-Type` only; wildcard origin blocked outright if `ENV=production` |
+| Sidebar conversation management | N/A | Rename and delete added (see *Frontend notes* below) |
+| Assistant-turn persistence ordering | N/A | `save_message` for the assistant's reply now happens **before** the `done` SSE event is yielded, not after (see *Backend notes* below) |
 
 ## Security hardening (added after a dedicated security/performance review)
 
@@ -141,6 +192,64 @@ either:
 | 10/11 | **No HTTP connection reuse** | Pooled `httpx.AsyncClient`, closed cleanly on shutdown |
 | 13 | **`MAX_TOOL_ITERATIONS=5`** worst case | Lowered to 3 |
 
+## Frontend notes (`cap-service/app/sd-agent-ui/index.html`)
+
+Single-file static HTML/CSS/JS, no build step, no framework — see rationale
+above.
+
+**Sidebar conversation management:**
+- **Naming a new conversation**: clicking "+ New conversation" prompts for
+  an optional name. Leaving it blank/cancelling falls back to the default
+  "New conversation" label.
+- **Rename**: hover a conversation row, click the ✏️ icon, enter a new name.
+  Renames the local sidebar label only — does not call any backend route.
+- **Delete**: hover a conversation row, click the 🗑️ icon, confirm. This
+  **only removes the conversation from the local sidebar list** (stored in
+  `localStorage`) — it does **not** delete the underlying `ChatSessions`/
+  `ChatMessages` rows server-side, since no delete action is exposed by the
+  CAP service. The confirmation dialog says this explicitly. Adding a true
+  server-side delete would require a new CAP action plus a corresponding
+  backend route — not built yet, deliberately, to avoid wiring a
+  destructive server call to a single client-side click without a
+  dedicated review.
+
+**Two CSS bugs fixed in the sidebar, easy to reintroduce if this file is
+restructured:**
+1. `#sidebar` and `#session-list` both need `min-height: 0`. Without it,
+   nested flex columns with `overflow-y: auto` silently fail to scroll —
+   the box just grows past the viewport instead, with literally no visual
+   symptom until there's enough content to actually overflow it.
+2. `.session-item` needs an explicit `line-height` (currently `1.4`).
+   `<button>` elements inherit an inconsistent browser-default
+   line-height that's tighter than the rest of the page, causing visible
+   text overlap between sidebar rows once there are enough to require
+   scrolling. This bug only becomes visible *after* the scroll fix above
+   is in place — it surfaced as what looked like a "new" regression
+   partway through fixing the first bug, when it had actually been there
+   the whole time, just hidden by the sidebar never having scrolled far
+   enough to expose it.
+
+## Backend notes (`backend/app/agent/`)
+
+- **`memory.py`** — all persistence to CAP/SQLite. See the GUID literal
+  gotcha above before modifying any `$filter` here.
+- **`loop.py`** — the core agentic loop. The assistant's final-turn
+  `save_message` call happens **before** the `done` SSE event is yielded,
+  not after. `run_agent` is an async generator backing a
+  `StreamingResponse`; once `done` is yielded, the client may stop reading
+  and the underlying connection can be torn down — code placed after an
+  async generator's final yield is not guaranteed to execute if the
+  consumer stops pulling from it. Persisting before `done` avoids racing
+  that teardown.
+- Both of `memory.py`'s exception handlers use `exc_info=True` on their
+  `logger.warning(...)` calls, deliberately. A generic one-line warning
+  with no traceback was the single biggest time-sink during debugging —
+  several real, distinct bugs (a missing native dependency, an invalid
+  OData filter, a type mismatch) were all hidden behind the same
+  unhelpful `"... (CAP/HANA unreachable?)"` message with zero underlying
+  error visible anywhere, across both the FastAPI and CAP logs, until
+  `exc_info=True` was added.
+
 ## Known gaps / things to decide before production
 
 - **Auth**: still no authentication beyond the session-id UUID format check.
@@ -148,16 +257,27 @@ either:
   OAuth2/JWT layer) in front of both services before exposing this beyond
   a demo. Rate limiting is a stopgap, not a substitute.
 - **SQLite persistence is per-instance and ephemeral across deploys**: it
-  survives app restarts but not a fresh `cf push` (the filesystem is
-  rebuilt). Acceptable for a demo; revisit if you need durable history
-  across redeploys.
+  survives app restarts (including CF auto-restarts after a crash) but
+  **not** a fresh `cf push` — every redeploy re-stages the app onto a
+  brand-new container filesystem, so all conversation history is wiped on
+  every redeploy, including for unrelated changes like a CSS tweak. This
+  was confirmed directly during development (history that worked
+  perfectly before a `cf push` for an unrelated UI change came back empty
+  immediately after). Acceptable for a demo; if durable history across
+  redeploys becomes a real requirement, look at HANA Cloud (if trial
+  entitlement allows) or a bound persistent volume service for the SQLite
+  file — neither the CAP service code nor the schema needs to change for
+  the migration to HANA itself, only the `db` config.
 - **CAP input validation** is regex-based on ID formats only — it does not
   check that a customer/order actually exists before hitting the sandbox
   (that's what `get_customer_details` is for).
 - **Real sandbox auth**: SAP Business Accelerator Hub sandbox keys are
   rate-limited and reset periodically.
+- **Delete only hides conversations locally**, it doesn't remove the
+  server-side transcript — see *Frontend notes* above if true deletion
+  becomes necessary.
 - **No automated test suite checked in** — the agent loop, validation logic,
-  and now the static UI were all verified manually (including a real
+  and the static UI were all verified manually (including a real
   Playwright browser test) during development. A `pytest`/Playwright suite
   checked into the repo would be a good next step for a portfolio piece.
 
@@ -181,4 +301,6 @@ either:
 ```
 
 Suggested `.gitignore` entries: `node_modules/`, `*.sqlite`, `.env`,
-`__pycache__/`, `*.pyc`, `venv/`.
+`__pycache__/`, `*.pyc`, `venv/`. Also add any one-off debug log dumps
+(e.g. `*_logs*.txt`) if you find yourself redirecting `cf logs` output to
+a file during troubleshooting — these have no business being committed.
